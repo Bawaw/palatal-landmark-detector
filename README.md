@@ -35,7 +35,7 @@ Conference
 </div>
  
 ## Description   
-This study is the first to develop geometric-deep-learning-based automatic landmarking of the palate. The network automatically places seven palatal landmarks on the canines, first molars, and on the palatal   midline of 3D surface scans of maxillary dental casts. The networkemploys a PointNet++-based network architecture to hierarchically learn features from point-clouds representing the surface of each cast. The network is trained from manual landmark annotations  on 740 dental casts and evaluated  on 106 dental casts.
+This study is the first to develop geometric-deep-learning-based automatic landmarking of the palate. The network automatically places seven palatal landmarks on the canines, first molars, and on the palatal midline of 3D surface scans of maxillary dental casts. The network employs a PointNet++-based network architecture to hierarchically learn features from point-clouds representing the surface of each cast. The network is trained from manual landmark annotations  on 740 dental casts and evaluated  on 106 dental casts.
 
 ## How to run (TODO)  
 First, install dependencies   
