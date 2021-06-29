@@ -16,15 +16,9 @@ from torch_geometric.data import Data, DataLoader, InMemoryDataset
 
 
 class CompleteDental3DInMemoryDataset(InMemoryDataset):
-    """
-    Dataset containing dental casts with complete dentition.
+    """ Dataset containing dental casts with complete dentition. """
 
-    """
-    def __init__(self,
-                 root,
-                 label_names,
-                 pre_process=None,
-                 transform=None,
+    def __init__(self, root, label_names, pre_process=None, transform=None,
                  pre_transform=None):
         self.label_names, self.pre_process = label_names, pre_process
         super().__init__(root, transform, pre_transform)
@@ -71,13 +65,18 @@ class CompleteDental3DInMemoryDataset(InMemoryDataset):
 
     def read_ply(self, path, read_color = False, read_features = False):
         ply_data = PlyData.read(path)
+
         data_template = Data()
+
         data_template.pos = torch.from_numpy(np.stack(
             [ply_data['vertex']['x'], ply_data['vertex']['y'],ply_data['vertex']['z']],-1))
+
         data_template.face = torch.from_numpy(np.stack(
             ply_data['face']['vertex_indices']).T).long()
+
         if read_features:
             data_template.x = torch.from_numpy(ply_data['vertex']['quality'])[:,None]
+
         if read_color:
             data_template.mesh_color = torch.from_numpy(np.stack(
                 [ply_data['vertex']['red'], ply_data['vertex']['green'],
@@ -87,9 +86,11 @@ class CompleteDental3DInMemoryDataset(InMemoryDataset):
 
     def read_metadata_as_dataframe(self):
         metadata = pd.concat([
-            pd.read_csv(f, header=0, index_col=0)
-            for f in glob.glob(os.path.join(self.raw_dir, 'metadata', '*.csv'))
-        ]).drop_duplicates()
+            pd.read_excel(f) for f in glob.glob(os.path.join(
+                self.raw_dir, 'metadata', '*2020.11.13.xlsx'))])
+
+        # drop rows with duplicate StudyIDs
+        metadata = metadata.drop_duplicates(subset=['StudyID'])
 
         # select participants that do not suffer from orofacial cleft
         metadata = metadata[metadata['Cleft_Type'] == 'Unaffected']
@@ -97,27 +98,34 @@ class CompleteDental3DInMemoryDataset(InMemoryDataset):
         # 0 total missing other_teeth
         metadata = metadata[metadata['TOT_OMT'] == 0]
 
-        # not born with congenitally missing teeth
-        metadata = metadata[metadata['MissingTeeth'] == 0]
-
-        # no lost/extracted teeth
-        metadata = metadata[metadata['LostTeeth'] == 0]
+        # permanent dentition only
+        metadata = metadata[metadata['DentitionType'] == 'Permanent']
 
         # drop all rows that have a NAN for one of the landmark coordinates
-        metadata = metadata.dropna(axis=0,
-                                   how='any',
-                                   subset=[
-                                       'IP_X', 'IP_Y', 'IP_Z', 'CR_X', 'CR_Y',
-                                       'CR_Z', 'CL_X', 'CL_Y', 'CL_Z',
-                                       '6R_ER_X', '6R_ER_Y', '6R_ER_Z',
-                                       '6L_EL_X', '6L_EL_Y', '6L_EL_Z', 'CM_X',
-                                       'CM_Y', 'CM_Z', 'MM_X', 'MM_Y', 'MM_Z'
-                                   ])
+        metadata = metadata.dropna(
+            axis=0, how='any', subset=[
+                'IP_X', 'IP_Y', 'IP_Z',
+                'CR_X', 'CR_Y', 'CR_Z',
+                'CL_X', 'CL_Y', 'CL_Z',
+                '6R_ER_X', '6R_ER_Y', '6R_ER_Z',
+                '6L_EL_X', '6L_EL_Y', '6L_EL_Z',
+                'CM_X', 'CM_Y', 'CM_Z',
+                'MM_X', 'MM_Y', 'MM_Z'])
+
+        # subjects to be excluded
+        excluded_subs = [
+            'NG13294', #– Landmarks still don’t align to mesh – possibly the landmarks or the scan were given the incorrect ID at Pittsburgh.
+            'CO12032' #– is missing teeth, but this is not correctly recorded in the metadata files.
+        ]
+
+
+        # remove rows that have a StudyID in excluded subs
+        metadata = metadata[~metadata['StudyID'].isin(excluded_subs)]
 
         # ensure determinism
         metadata = metadata.sort_values('StudyID').reset_index(drop=True)
 
-        assert len(metadata) == 1057, 'expected a total of 1057 individuals in' \
+        assert len(metadata) == 1045, 'expected a total of 1045 individuals in' \
             'the simple complete data, but got {} in metadata'.format(len(metadata))
 
         df = metadata[['StudyID', *self.label_names]]
@@ -129,16 +137,16 @@ class CompleteDental3DInMemoryDataset(InMemoryDataset):
 
     def process(self):
         # read all the filtered metadata in one dataframe
+
         data = self.read_metadata_as_dataframe()
 
         data['path'] = self.get_path_by_id(data['StudyID'].values)
 
-        assert len(data['path']) == 1057, 'expected a total of 1057 individuals in' \
+        assert len(data['path']) == 1045, 'expected a total of 1045 individuals in' \
             'the simple complete data, but got {} in objs'.format(len(raw_paths))
 
-        # TODO: for testing, work with a subset of the data only
+        # for debug purposes
         #data = data[:10]
-        # data = data[:-500]
 
         # read the .ply files of the meshes, format Data(pos, face)
         data_list = []
@@ -249,6 +257,7 @@ class HoldoutDataset(pl.LightningDataModule):
     def train_dataloader(self):
         return DataLoader(self.data_train,
                           batch_size=self.batch_size,
+                          num_workers=16,
                           shuffle=True)
 
     def val_dataloader(self):
@@ -285,11 +294,9 @@ class CurvatureCompleteDentalDataModule(HoldoutDataset):
 
         # Generate standardised landmarks to setup pca
         training_set_landmarks = torch.tensor(
-            pd.read_csv(os.path.join(root,
-                                     'normalised_train_data_landmarks.csv'),
-                        header=0,
-                        index_col=0).values[:, 1:].astype('float32')).view(
-                            -1, 7, 3)
+            pd.read_csv(os.path.join(
+                root, 'normalised_train_data_landmarks.csv'
+            ), header=0, index_col=0).values[:, 1:].astype('float32')).view(-1, 7, 3)
 
         pre_transform = local_transforms.InvertibleCompose(
             [
@@ -301,8 +308,7 @@ class CurvatureCompleteDentalDataModule(HoldoutDataset):
                 local_transforms.UnitNormaliseScalar(),
 
                 # propagate curvature feature to local extreme
-                # the n_iters argument is actually not used
-                local_transforms.PropageteFeaturesToLocalExtremes(n_iters=20, c=80),
+                local_transforms.PropageteFeaturesToLocalExtremes(c=80),
 
                 # remove vertices based on curvature
                 local_transforms.FilterVerts(
@@ -332,8 +338,8 @@ class CurvatureCompleteDentalDataModule(HoldoutDataset):
             [
                 local_transforms.LabelCloner('continuous_curvature', 'x'),
                 local_transforms.SamplePoints(num_point_samples,
+                                              remove_faces=False,
                                               include_normals=True,
-                                              remove_faces=True,
                                               include_features=True),
                 local_transforms.MergeLabels('norm'),
                 local_transforms.ZNormalise('x'),
@@ -377,16 +383,17 @@ class PatchBasedCompleteDentalDataModule(HoldoutDataset):
         ]
 
         # read ids used in training
-        training_ids = pd.read_csv(os.path.join(root, 'training_ids.csv'),
-                                   header=0,
-                                   index_col=0)
+        training_ids = pd.read_csv(
+            os.path.join(
+                root, 'normalised_train_data_landmarks.csv'), header=0, index_col=0)['StudyID']
+
         # read predicted landmarks for training examples
         landmarks = pd.concat([
             pd.read_csv(f, header=0, index_col=0)
-            for f in glob.glob(os.path.join(root, 'v0*.csv'))
-        ])
-        landmarks = landmarks[landmarks['StudyID'].isin(
-            training_ids.values[:, 0])]
+            for f in glob.glob(os.path.join(root, 'v0*.csv'))])
+        landmarks = landmarks[landmarks['StudyID'].isin(training_ids.values)]
+
+        assert len(landmarks) == len(training_ids)
 
         # get ground truth and predicted labels
         gt_landmarks = landmarks[gt_labels].astype(float)
@@ -405,8 +412,8 @@ class PatchBasedCompleteDentalDataModule(HoldoutDataset):
                 # # add edge_attr containing relative euclidean distance
                 ptg_transforms.Distance(norm=False, cat=False),
                 # extract patch around
-                local_transforms.ExtractGeodesicPatch(patch_size,
-                                                      key='patch_center'),
+                local_transforms.ExtractGeodesicPatch(
+                    patch_size, key='patch_center'),
 
                 # b-normalise
                 local_transforms.NormalizeScale(invertible=True),
@@ -427,40 +434,38 @@ class PatchBasedCompleteDentalDataModule(HoldoutDataset):
 
         transform = ptg_transforms.Compose([
             local_transforms.LabelCloner('continuous_curvature', 'x'),
-            local_transforms.SamplePoints(num_point_samples,
-                                          remove_faces=False,
-                                          include_normals=True,
-                                          include_features=True),
+            local_transforms.SamplePoints(
+                num_point_samples, remove_faces=False, include_normals=True,
+                include_features=True),
             local_transforms.MergeLabels('norm'),
             local_transforms.ZNormalise('x'),
             local_transforms.LabelCleaner([
                 'mesh_vert', 'norm', 'continuous_curvature', 'patch_center',
-                'face', 'mesh_norm'
+                'face', 'mesh_norm', 'mesh_color'
             ])
         ])
 
-        super().__init__(root,
-                         batch_size=batch_size,
-                         pre_process=pre_process,
-                         transform=transform,
-                         labels=labels,
-                         pre_transform=pre_transform)
+        super().__init__(
+            root, batch_size=batch_size, pre_process=pre_process, transform=transform, labels=labels,
+            pre_transform=pre_transform)
 
     @property
     def n_features(self):
         return 4
 
     def set_patch_centers(self, data_list, metadata):
+        # Read holistic step predictions
         predicted_landmarks = pd.concat([
             pd.read_csv(f, header=0, index_col=0)
             for f in glob.glob(os.path.join(self.root, 'v0*.csv'))
         ])
 
+        # assign holistic step predictions to d.patch_center
         for d in data_list:
             d.patch_center = torch.from_numpy(
-                predicted_landmarks[predicted_landmarks['StudyID'] ==
-                                    d.identity][self.labels].values.astype(
-                                        np.float32)).float()
+                predicted_landmarks[
+                    predicted_landmarks['StudyID'] == d.identity][
+                        self.labels].values.astype(np.float32)).float()
         return data_list
 
     def train_dataloader(self):
@@ -468,4 +473,5 @@ class PatchBasedCompleteDentalDataModule(HoldoutDataset):
             self.sample_weights, len(self.sample_weights))
         return DataLoader(self.data_train,
                           batch_size=self.batch_size,
+                          num_workers=16,
                           sampler=sampler)

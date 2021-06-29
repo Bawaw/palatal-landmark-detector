@@ -8,12 +8,11 @@ from pytorch_lightning.core import LightningModule
 epochs = 2000
 num_samples = 4096
 
-#official_experiment = False
 official_experiment = True
 
 # init dataset
-dataset = CurvatureCompleteDentalDataModule(batch_size=64,
-                                            num_point_samples=num_samples)
+dataset = CurvatureCompleteDentalDataModule(
+    batch_size=64, num_point_samples=num_samples)
 
 # init model, pass dataset for labels information and preprocessing steps
 model = DentalNetModule(dataset=dataset)

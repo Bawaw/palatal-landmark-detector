@@ -7,14 +7,15 @@ import torch_geometric.transforms as ptg_transforms
 from torch.utils.data import random_split
 from project.dental_data import HoldoutDataset, CompleteDental3DInMemoryDataset
 
+# This script should be executed before all else to generate the normalised training set landmarks
 
 class CurvatureCompleteDentalDataNormalisedLandmarkGenerator(HoldoutDataset):
     def __init__(self, batch_size=32, num_point_samples=4096):
-        """
-          It seems overkill to run the entire pipeline just to normalise the landmarks
-          but it is required to find the bounding box.
-        """
-        root = '../../data/CurvatureComplete_normalisation_only/'
+        """ This code runs the preprocessing pipeline ones and stores the standardised
+        coordinates. It seems overkill to run the entire pipeline just to normalise the landmarks
+        but it is required to find the bounding box. """
+
+        root = '../data/CurvatureComplete_normalisation_only/'
 
         prep_dir = os.path.join(root, 'prep_parameters')
 
@@ -29,7 +30,7 @@ class CurvatureCompleteDentalDataNormalisedLandmarkGenerator(HoldoutDataset):
                 local_transforms.UnitNormaliseScalar(),
 
                 # propagate curvature feature to local extreme
-                local_transforms.PropageteFeaturesToLocalExtremes(n_iters=20, c=80),
+                local_transforms.PropageteFeaturesToLocalExtremes(c=80),
 
                 # remove vertices based on curvature
                 local_transforms.FilterVerts(
@@ -69,10 +70,10 @@ class CurvatureCompleteDentalDataNormalisedLandmarkGenerator(HoldoutDataset):
             self.dataset, [sz_train, sz_val, sz_test],
             generator=torch.Generator().manual_seed(42))
 
-        for data_obj in self.dataset:
-            data_obj.mesh_vert = data_obj.pos
-            from vis.plotter import plot_landmarks_and_pred, plot_data_obj
-            plot_data_obj(data_obj)
+        # for data_obj in self.dataset:
+        #     data_obj.mesh_vert = data_obj.pos
+        #     from vis.plotter import plot_landmarks_and_pred, plot_data_obj
+        #     plot_data_obj(data_obj)
 
 
         # the data for the pca normalisation is only taken from the trainingset
@@ -83,8 +84,11 @@ class CurvatureCompleteDentalDataNormalisedLandmarkGenerator(HoldoutDataset):
                 'StudyID', *self.dataset.label_names
             ]).to_csv(os.path.join(self.root, 'normalised_train_data_landmarks.csv'))
 
-epochs = 2000
-num_samples = 4096
-dataset = CurvatureCompleteDentalDataNormalisedLandmarkGenerator(
-    batch_size=64, num_point_samples=num_samples)
-dataset.store_normalised_landmarks()
+if __name__ == '__main__':
+    # preprocess data
+    num_samples = 4096
+    dataset = CurvatureCompleteDentalDataNormalisedLandmarkGenerator(
+        batch_size=64, num_point_samples=num_samples)
+
+    # store preprocessed data
+    dataset.store_normalised_landmarks()
